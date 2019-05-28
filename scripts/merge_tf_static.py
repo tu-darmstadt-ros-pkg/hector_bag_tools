@@ -1,7 +1,9 @@
 #!/usr/bin/env python
+# PYTHON_ARGCOMPLETE_OK
 from __future__ import print_function, division
 
 import argparse
+import argcomplete
 from shutil import copyfile
 import os
 
@@ -15,7 +17,9 @@ def parse_arguments():
     parser.add_argument('bags', metavar='BAGS', nargs="+", help='Target bag files')
     parser.add_argument("--publish_period", type=float, default=5.0, help="Desired publishing period of tf "
                                                                           "messages in s.")
+    parser.add_argument("--no_backup", action="store_true", default=False, help="Disable creating of backup files")
 
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
     return args
 
@@ -75,7 +79,7 @@ if __name__ == "__main__":
     # Open target bags
     for bag_path in args.bags:
         print("Writing to bag '{}'".format(bag_path))
-        if backup(bag_path):
+        if args.no_backup or backup(bag_path):
             bag = rosbag.Bag(bag_path, "a")
             write_tf_to_bag(bag, tf_msgs, args.publish_period)
             bag.close()
