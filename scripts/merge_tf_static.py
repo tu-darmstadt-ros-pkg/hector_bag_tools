@@ -18,15 +18,17 @@ def parse_arguments():
     parser.add_argument("--publish_period", type=float, default=5.0, help="Desired publishing period of tf "
                                                                           "messages in s.")
     parser.add_argument("--no_backup", action="store_true", default=False, help="Disable creating of backup files")
+    parser.add_argument("--source_topic", default="/tf_static", help="Name of tf static source topic")
+    parser.add_argument("--target_topic", default="/tf_static_repub", help="Topic where messages are rewritten to")
 
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
     return args
 
 
-def get_static_tf(bag):
+def get_static_tf(bag, topic):
     tf_list = []
-    for topic, msg, t in bag.read_messages(topics=['/tf_static']):
+    for topic, msg, t in bag.read_messages(topics=[topic]):
         tf_list.append(msg)
     return tf_list
 
@@ -57,13 +59,13 @@ def backup(bag_path):
             return True
 
 
-def write_tf_to_bag(bag, msg_list, period):
+def write_tf_to_bag(bag, msg_list, period, topic_name):
     start_time = bag.get_start_time()
     end_time = bag.get_end_time()
     for time in frange(start_time, end_time, period):
         write_time = rospy.Time(time)
         for msg in msg_list:
-            bag.write("/tf_static", msg, write_time)
+            bag.write(topic_name, msg, write_time)
 
 
 if __name__ == "__main__":
@@ -72,7 +74,7 @@ if __name__ == "__main__":
     # Open reference bag
     print("Opening reference bag '{}'".format(args.ref_bag))
     ref_bag = rosbag.Bag(args.ref_bag, "r")
-    tf_msgs = get_static_tf(ref_bag)
+    tf_msgs = get_static_tf(ref_bag, args.source_topic)
     print("Found {} tf messages".format(len(tf_msgs)))
     ref_bag.close()
 
@@ -81,7 +83,7 @@ if __name__ == "__main__":
         print("Writing to bag '{}'".format(bag_path))
         if args.no_backup or backup(bag_path):
             bag = rosbag.Bag(bag_path, "a")
-            write_tf_to_bag(bag, tf_msgs, args.publish_period)
+            write_tf_to_bag(bag, tf_msgs, args.publish_period, args.target_topic)
             bag.close()
 
 
