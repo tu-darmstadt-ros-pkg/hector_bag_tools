@@ -1,0 +1,74 @@
+#!/usr/bin/env python
+# PYTHON_ARGCOMPLETE_OK
+
+import argparse
+import argcomplete
+import os
+
+import rosbag
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Split a bag file by size')
+    parser.add_argument("bag", help='Bagfile to be split')
+    parser.add_argument("-d", "--duration", type=int, help="Bag file duration [s]")
+    parser.add_argument("-s", "--size", type=float, help="Bag file size [GB]")
+
+    argcomplete.autocomplete(parser)
+    args = parser.parse_args()
+    if not (args.size or args.duration):
+        print("Either argument --size or --duration is required")
+    if args.size and args.size < 0.01:
+        args.size = 3
+        print("Minimum size is 0.01GB, using default value 3GB")
+    if args.duration and args.duration < 1:
+        args.duration = 300
+        print("Minimum duration is 1s, using default value 300s")
+    return args
+
+
+if __name__ == "__main__":
+    args = parse_arguments()
+
+    try:
+        bag = rosbag.Bag(args.bag)
+    except:
+        print("Could not read bag file %s" % args.bag)
+
+    split_duration = args.duration if args.duration else None
+    split_size = args.size * 1024**3 if args.size else None
+    
+    bag_idx = 0
+    size = 0
+    duration = 0
+    t0 = None
+    
+    success = True
+    new_path = os.path.splitext(args.bag)[0] + "_" + str(bag_idx) + os.path.splitext(args.bag)[1]    
+    if os.path.exists(new_path):
+        print("File '%s' already exists!" % new_path)
+        success = False
+    else:
+        outbag = rosbag.Bag(new_path, 'w')
+        print("Writing bag %s" % new_path)
+        for topic, msg, t in bag.read_messages(raw=True):        
+            if not t0:
+                t0 = t
+            size += len(msg[1])
+            duration = (t - t0).secs        
+            if args.size and size > split_size or args.duration and duration > split_duration:
+                outbag.close()
+                bag_idx += 1
+                new_path = os.path.splitext(args.bag)[0] + "_" + str(bag_idx) + os.path.splitext(args.bag)[1]
+                if os.path.exists(new_path):
+                    print("File '%s' already exists!" % new_path)
+                    success = False
+                    break
+                print("Writing bag %s" % new_path)
+                t0 = t
+                outbag = rosbag.Bag(new_path, 'w')
+                size = 0
+            outbag.write(topic, msg, t, raw=True)
+    
+    if success:
+        print("Done")
+        
