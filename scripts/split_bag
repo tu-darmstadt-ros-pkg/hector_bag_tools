@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # PYTHON_ARGCOMPLETE_OK
 
+# A simple python script to split a large bag file into smaller ones, either by duration or size.
+
 import argparse
 import argcomplete
 import os
@@ -12,6 +14,7 @@ def parse_arguments():
     parser.add_argument("bag", help='Bagfile to be split')
     parser.add_argument("-d", "--duration", type=int, help="Bag file duration [s]")
     parser.add_argument("-s", "--size", type=float, help="Bag file size [GB]")
+    parser.add_argument("-r", "--repeat_latched", action='store_true', help="Repeat latched messages at beginning of every bag file")
 
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
@@ -42,6 +45,8 @@ if __name__ == "__main__":
     duration = 0
     t0 = None
     
+    latched_msgs = {}  # key: topic + ':::' + callerid, val: [topic, msg, t, header]
+    
     success = True
     new_path = os.path.splitext(args.bag)[0] + "_" + str(bag_idx) + os.path.splitext(args.bag)[1]    
     if os.path.exists(new_path):
@@ -50,11 +55,26 @@ if __name__ == "__main__":
     else:
         outbag = rosbag.Bag(new_path, 'w')
         print("Writing bag %s" % new_path)
-        for topic, msg, t in bag.read_messages(raw=True):        
+
+        # Iterate over all messages
+        for topic, msg, t, *header in bag.read_messages(raw=True, return_connection_header=args.repeat_latched):            
+
+            if args.repeat_latched:
+                # Check if connection is latching
+                latching = bool(int(header[0]['latching'].decode('UTF-8')))
+                
+                # Insert latched msg in dict, one entry for each topic/caller_id pair
+                if latching:
+                    key = topic + ':::' + header[0]["callerid"].decode('UTF-8')
+                    latched_msgs[key] = [topic, msg, t, header]
+
+            # Save time stamp of first message
             if not t0:
                 t0 = t
             size += len(msg[1])
-            duration = (t - t0).secs        
+            duration = (t - t0).secs
+
+            # Close current bag and open new one
             if args.size and size > split_size or args.duration and duration > split_duration:
                 outbag.close()
                 bag_idx += 1
@@ -65,10 +85,19 @@ if __name__ == "__main__":
                     break
                 print("Writing bag %s" % new_path)
                 t0 = t
-                outbag = rosbag.Bag(new_path, 'w')
                 size = 0
+                outbag = rosbag.Bag(new_path, 'w')
+
+                # Start each new bag file with copies of all latched messages
+                if args.repeat_latched:
+                    for l_msg in latched_msgs.values():
+                        
+                        # Overwrite the original receipt time, otherwise the new bag will have a gap before the new messages start
+                        outbag.write(topic=l_msg[0], msg=l_msg[1], t=t0, raw=True)
+                
             outbag.write(topic, msg, t, raw=True)
-    
-    if success:
+            
+    outbag.close()
+    if success:        
         print("Done")
         
